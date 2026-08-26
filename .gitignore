@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Spark / Glue local runs
+spark-warehouse/
+metastore_db/
+derby.log
+
+# AWS
+.aws-sam/
+*.pem
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
