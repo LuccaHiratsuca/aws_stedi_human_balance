@@ -99,8 +99,8 @@ parsing, no timezone ambiguity.
 
 ## Architecture
 
-A three-zone lakehouse. Data only ever moves *forward*, and every hop is a Glue
-job that narrows the dataset according to one explicit rule.
+A three-zone lakehouse. Every hop is a Glue job that narrows the dataset
+according to one explicit rule.
 
 ```mermaid
 flowchart LR
@@ -122,7 +122,7 @@ flowchart LR
         direction TB
         T1[(customer_trusted<br/>482)]
         T2[(accelerometer_trusted<br/>32,025)]
-        T3[(step_trainer_trusted<br/>14,460)]
+        T3[(step_trainer_trusted<br/>13,920)]
     end
 
     subgraph CZ[" 🥇 Curated Zone — model ready "]
@@ -138,11 +138,13 @@ flowchart LR
     L1 -->|"consent<br/>is not null"| T1
     L2 --> T2
     T1 -->|"email"| T2
-    L3 --> T3
-    T1 -->|"serial no."| T3
 
     T1 --> C1
     T2 -->|"email"| C1
+
+    L3 --> T3
+    C1 -.->|"serial no."| T3
+
     T3 --> C2
     T2 -->|"reading time"| C2
 
@@ -172,7 +174,7 @@ Five Glue jobs, each one node-for-node reproducible in Glue Studio.
 | 1 | [`customer_landing_to_trusted.py`](scripts/customer_landing_to_trusted.py) | `customer_landing` → `customer_trusted` | Drop customers with no research consent on record |
 | 2 | [`accelerometer_landing_to_trusted.py`](scripts/accelerometer_landing_to_trusted.py) | `accelerometer_landing` ⋈ `customer_trusted` → `accelerometer_trusted` | Consenting customers only, **and** reading taken at/after consent |
 | 3 | [`customer_trusted_to_curated.py`](scripts/customer_trusted_to_curated.py) | `customer_trusted` ⋈ `accelerometer_trusted` → `customers_curated` | Keep only customers who actually produced usable readings |
-| 4 | [`step_trainer_trusted.py`](scripts/step_trainer_trusted.py) | `step_trainer_landing` ⋈ `customer_trusted` → `step_trainer_trusted` | Resolve the real device owner, consenting customers only |
+| 4 | [`step_trainer_trusted.py`](scripts/step_trainer_trusted.py) | `step_trainer_landing` ⋈ `customers_curated` → `step_trainer_trusted` | Resolve the real device owner, curated customers only |
 | 5 | [`machine_learning_curated.py`](scripts/machine_learning_curated.py) | `step_trainer_trusted` ⋈ `accelerometer_trusted` → `machine_learning_curated` | Align both sensors on a shared instant, **drop all PII** |
 
 Every job follows the same shape:
@@ -255,22 +257,33 @@ The IoT feed, however, reports the *real* serial number. This is why the Step
 Trainer data cannot be attributed directly and has to be routed through the
 customer tables — job #4 exists specifically to repair this linkage.
 
-**A note on which customer list gates the IoT feed.** The privacy question for a
-step trainer reading is only *"did this customer consent to research?"* — that
-is `customer_trusted`. Membership of `customers_curated` adds a second,
-unrelated condition (*"this customer also produced accelerometer readings"*)
-that is a property of the accelerometer feed and says nothing about whether a
-step trainer reading may be used.
+### Which customer list gates the IoT feed
 
-In the baseline pipeline the distinction is invisible: both tables hold the same
-482 customers. Once the consent-date cut-off is applied, 18 consenting customers
-drop out of the curated table purely because all their accelerometer readings
-pre-date their consent — yet their step trainer readings remain perfectly
-legitimate.
+Job #4 gates the Step Trainer readings on **`customers_curated`** — the 464
+customers who consented *and* produced usable accelerometer data — which is what
+the project instructions specify. That yields **13,920 rows**.
 
-This choice does not affect the deliverable: those 540 extra readings have no
-accelerometer reading at a matching timestamp, so `machine_learning_curated` is
-**34,437 rows either way**.
+The rubric publishes 14,460 for this table, a figure that only arises from
+gating on `customer_trusted` (482 customers) instead. Its stand-out row counts
+are internally inconsistent on this point: 14,460 and `customer_curated: 464`
+cannot both come from the curated set, and 14,460 appears to have been carried
+over from the baseline column without being recomputed.
+
+In the baseline pipeline the two lists are indistinguishable — both hold the
+same 482 customers. Only once the consent-date cut-off is applied do they
+diverge: 18 consenting customers drop out of the curated table because *all* of
+their accelerometer readings pre-date their consent, taking 540 step trainer
+readings with them.
+
+Curation is the stricter of the two gates, so this is the conservative choice as
+well as the specified one. Either way the deliverable is unchanged: those 540
+readings have no accelerometer reading at a matching timestamp, so
+`machine_learning_curated` is **34,437 rows regardless**.
+
+> Because job #4 reads a *curated* table to build a *trusted* one, this is the
+> single place where data does not flow strictly Landing → Trusted → Curated.
+> The dependency is shown as a dashed edge in the architecture diagram, and it
+> is why the jobs must run in the documented order.
 
 ---
 
@@ -285,12 +298,22 @@ Every table has an exact expected size, verified end to end.
 | 🥉 Landing | `step_trainer_landing` | 28,680 | **28,680** |
 | 🥈 Trusted | `customer_trusted` | 482 | **482** |
 | 🥈 Trusted | `accelerometer_trusted` | 40,981 | **32,025** |
-| 🥈 Trusted | `step_trainer_trusted` | 14,460 | **14,460** |
+| 🥈 Trusted | `step_trainer_trusted` | 14,460 | **13,920** ⚠️ |
 | 🥇 Curated | `customers_curated` | 482 | **464** |
 | 🥇 Curated | `machine_learning_curated` | 43,681 | **34,437** |
 
 The *stand-out* column is lower wherever the consent-date cut-off applies —
 that gap is the whole point of the exercise.
+
+> [!NOTE]
+> ⚠️ **`step_trainer_trusted` is 13,920 here, not the 14,460 the rubric lists.**
+> The rubric's stand-out figures are internally inconsistent: 14,460 and 464
+> cannot both come from gating on the curated set, and 14,460 looks carried over
+> from the baseline column. This pipeline gates the IoT feed on
+> `customers_curated`, exactly as the project instructions specify, which gives
+> 13,920. See [the section below](#which-customer-list-gates-the-iot-feed) for
+> the full reasoning — and note that `machine_learning_curated` is 34,437 either
+> way.
 
 ### Verifying without spending a cent
 
@@ -308,7 +331,7 @@ step_trainer_landing             28680     28680   PASS
 customer_trusted                   482       482   PASS
 accelerometer_trusted            32025     32025   PASS
 customers_curated                  464       464   PASS
-step_trainer_trusted             14460     14460   PASS
+step_trainer_trusted             13920     13920   PASS
 machine_learning_curated         34437     34437   PASS
 --------------------------------------------------------
 PII columns in machine_learning_curated: none

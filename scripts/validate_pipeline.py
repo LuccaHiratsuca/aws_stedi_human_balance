@@ -25,7 +25,10 @@ EXPECTED = {
     "customer_trusted": 482,
     "accelerometer_trusted": 32025,
     "customers_curated": 464,
-    "step_trainer_trusted": 14460,
+    # 13920, not the 14460 the rubric publishes: that figure comes from gating
+    # the IoT feed on customer_trusted (482) rather than customers_curated (464).
+    # See the docstring of scripts/step_trainer_trusted.py.
+    "step_trainer_trusted": 13920,
     "machine_learning_curated": 34437,
 }
 
@@ -66,12 +69,10 @@ def main():
     customers_curated = [c for c in customer_trusted if c["email"] in emails_with_accel]
 
     # ---------------- step_trainer_trusted ----------------
-    # INNER JOIN customer_trusted ON serialnumber. Consent -- not curation -- is
-    # the privacy gate for the IoT feed; see the docstring of
-    # scripts/step_trainer_trusted.py for why.
-    consenting_serials = {c["serialNumber"] for c in customer_trusted}
+    # INNER JOIN customers_curated ON serialnumber
+    curated_serials = {c["serialNumber"] for c in customers_curated}
     step_trainer_trusted = [
-        s for s in step_trainer_landing if s["serialNumber"] in consenting_serials
+        s for s in step_trainer_landing if s["serialNumber"] in curated_serials
     ]
 
     # ---------------- machine_learning_curated ----------------
