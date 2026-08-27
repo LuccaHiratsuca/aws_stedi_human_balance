@@ -364,9 +364,14 @@ aws s3 cp data/accelerometer/landing/ $BUCKET/accelerometer/landing/ --recursive
 aws s3 cp data/step_trainer/landing/  $BUCKET/step_trainer/landing/  --recursive
 ```
 
-> Replace `stedi-lakehouse` with your own bucket name, then update the
-> `LANDING_PATH` / `TRUSTED_PATH` / `CURATED_PATH` constants at the top of each
-> script in `scripts/` and the `LOCATION` clause in each file in `sql/`.
+> `stedi-lakehouse` is the bucket this project actually runs against, and the
+> Glue database is `stedi` — both are already set throughout `scripts/` and
+> `sql/`, so no substitution is needed.
+>
+> To point the pipeline at a different bucket, change the `LANDING_PATH` /
+> `TRUSTED_PATH` / `CURATED_PATH` constants at the top of each script in
+> `scripts/`, the `LOCATION` clause in each file in `sql/`, and the
+> `GLUE_DATABASE` constant if the database name changes too.
 
 ### 2. Create the landing zone tables
 
